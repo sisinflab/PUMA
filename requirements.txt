@@ -1,0 +1,9 @@
+numpy>=1.26
+torch>=2.1
+pillow>=10.0
+tqdm>=4.66
+transformers>=4.45
+huggingface_hub>=0.24
+datasets>=2.19
+# Optional: faster extraction with vLLM
+# vllm>=0.6.0
