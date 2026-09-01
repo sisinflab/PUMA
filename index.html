@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PUMA — Same multimodal retriever. 16× smaller. 25× faster.</title>
+<meta name="description" content="PUMA turns the dense embeddings of a frozen universal multimodal embedder into sparse retrieval codes: 8-16x less storage, up to 25x faster exact search, no backbone retraining." />
+<meta property="og:title" content="PUMA — Same multimodal retriever. 16× smaller. 25× faster." />
+<meta property="og:description" content="Post-hoc sparsification for universal multimodal embeddings. Keep the backbone frozen, shrink the index, speed up search." />
+<meta property="og:type" content="article" />
+<script>
+window.MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]] }, svg: { fontCache: "global" } };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+  :root {
+    --fg: #111418;
+    --muted: #5b6573;
+    --faint: #8a93a3;
+    --bg: #ffffff;
+    --bg-soft: #f6f8fb;
+    --border: #dfe4ec;
+    --accent: #1657d0;
+    --accent-2: #7a3df0;
+    --accent-soft: #eaf0ff;
+    --good: #12855a;
+    --good-soft: #e8f6ef;
+    --warn: #b5760a;
+    --warn-soft: #fdf3e2;
+    --bad: #c0392b;
+    --bad-soft: #fdeceb;
+    --hero-grad: linear-gradient(135deg, #eef3ff 0%, #f7eefb 50%, #fff4ec 100%);
+  }
+  html { box-sizing: border-box; scroll-behavior: smooth; }
+  *, *::before, *::after { box-sizing: inherit; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- HERO ---------- */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    background: var(--hero-grad);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 0 40px;
+    text-align: center;
+  }
+  .eyebrow {
+    display: inline-block;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid #c6d6f5;
+    padding: 4px 12px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-size: 52px;
+    line-height: 1.08;
+    margin: 0 auto 16px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    max-width: 900px;
+  }
+  h1 .grad {
+    background: linear-gradient(90deg, #0f2dad 0%, #6b1ed6 55%, #d6411e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    font-size: 19.5px;
+    color: #2c3542;
+    max-width: 730px;
+    margin: 0 auto 20px;
+  }
+  .lede strong { color: var(--fg); }
+  .papertitle {
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 760px;
+    margin: 22px auto 8px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(0,0,0,0.07);
+  }
+  .papertitle em { color: var(--fg); font-style: normal; font-weight: 600; }
+  .authors { color: var(--fg); font-size: 15px; margin: 6px auto 6px; max-width: 940px; }
+  .authors .a { white-space: nowrap; }
+  .authors .a strong { font-weight: 600; }
+  .authors sup { color: var(--accent); font-weight: 600; margin: 0 1px; }
+  .affil { color: var(--muted); font-size: 13px; margin: 4px auto 6px; max-width: 940px; }
+  .affil .a { white-space: nowrap; margin: 0 6px; }
+  .corr { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .corr code { background: #fff; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 22px 0 4px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #fff; color: var(--fg);
+    font-weight: 500; font-size: 14.5px;
+    box-shadow: 0 1px 2px rgba(20,30,60,0.04);
+    transition: transform 0.08s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20,30,60,0.08); border-color: var(--accent); color: var(--accent); text-decoration: none; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: #0c45ab; color: #fff; border-color: #0c45ab; }
+
+  /* ---------- NAV ---------- */
+  .nav {
+    position: sticky; top: 0; z-index: 30;
+    background: rgba(255,255,255,0.9);
+    backdrop-filter: saturate(180%) blur(10px);
+    -webkit-backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav .wrap { display: flex; gap: 4px; overflow-x: auto; padding-top: 8px; padding-bottom: 8px; scrollbar-width: none; }
+  .nav .wrap::-webkit-scrollbar { display: none; }
+  .nav a {
+    white-space: nowrap; font-size: 13px; color: var(--muted);
+    padding: 5px 11px; border-radius: 999px; border: 1px solid transparent;
+  }
+  .nav a:hover { color: var(--accent); background: var(--accent-soft); border-color: #c6d6f5; text-decoration: none; }
+
+  main { padding: 56px 0 60px; }
+  section { margin-top: 68px; scroll-margin-top: 64px; }
+  section:first-of-type { margin-top: 0; }
+  .kicker {
+    display: block; text-transform: uppercase; letter-spacing: 0.14em;
+    font-size: 11.5px; font-weight: 700; color: var(--accent-2); margin-bottom: 6px;
+  }
+  h2 { font-size: 30px; margin: 0 0 10px; letter-spacing: -0.02em; font-weight: 800; line-height: 1.2; }
+  h2 + .sub { color: var(--muted); font-size: 16.5px; max-width: 760px; margin: 0 0 22px; }
+  h3 { font-size: 17.5px; margin: 26px 0 8px; font-weight: 700; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 5px; }
+
+  .tldr {
+    background: linear-gradient(180deg, #f6f8ff 0%, #fbf6ff 100%);
+    border: 1px solid #d6def7; border-left: 4px solid var(--accent);
+    padding: 20px 24px; border-radius: 12px; font-size: 17px;
+  }
+  .tldr strong { color: var(--accent); }
+
+  /* ---------- KPIs / CARDS ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 14px; }
+  .kpi {
+    border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+    background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+  }
+  .kpi .n { display: block; font-size: 32px; font-weight: 800; color: var(--accent); line-height: 1.05; letter-spacing: -0.02em; }
+  .kpi .l { color: var(--muted); font-size: 13px; margin-top: 7px; display: block; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 16px; }
+  .card {
+    border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+    background: #fff; box-shadow: 0 2px 10px rgba(20,30,60,0.04);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 16px; }
+  .card .step {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent); background: var(--accent-soft);
+    border: 1px solid #c6d6f5; border-radius: 999px; padding: 2px 9px; margin-bottom: 10px;
+  }
+  .card .step.warn { color: var(--warn); background: var(--warn-soft); border-color: #f0dcb4; }
+  .card .step.bad { color: var(--bad); background: var(--bad-soft); border-color: #f3cbc7; }
+  .card p { font-size: 14.5px; margin: 0; color: var(--muted); }
+  .card p + p { margin-top: 10px; }
+  .card .big { font-size: 30px; font-weight: 800; color: var(--fg); letter-spacing: -0.02em; display: block; margin-bottom: 4px; }
+
+  /* ---------- ANIMATION SHELL ---------- */
+  .viz {
+    border: 1px solid var(--border); border-radius: 16px; background: #fff;
+    padding: 22px; margin: 18px 0 10px; box-shadow: 0 6px 24px rgba(20,30,60,0.05);
+    overflow: hidden;
+  }
+  .viz-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .viz-title { font-weight: 700; font-size: 15px; }
+  .viz-note { color: var(--faint); font-size: 12.5px; }
+  .viz-cap { color: var(--muted); font-size: 13.5px; margin-top: 14px; }
+  .live {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--good);
+    background: var(--good-soft); border: 1px solid #c7e6d7; border-radius: 999px; padding: 2px 9px;
+  }
+  .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--good); animation: blip 1.6s infinite; }
+  @keyframes blip { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+  /* animations are paused until scrolled into view */
+  .anim [class*="an-"] { animation-play-state: paused; }
+  .anim.in-view [class*="an-"] { animation-play-state: running; }
+
+  /* staged appear keyframes, one 8s cycle, onset encoded in % */
+  @keyframes ap1 { 0%,1%{opacity:0;transform:translateY(7px)} 7%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap2 { 0%,12%{opacity:0;transform:translateY(7px)} 18%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap3 { 0%,24%{opacity:0;transform:translateY(7px)} 30%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap4 { 0%,36%{opacity:0;transform:translateY(7px)} 42%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap5 { 0%,52%{opacity:0;transform:translateY(7px)} 58%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap6 { 0%,58%{opacity:0;transform:translateY(7px)} 64%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap7 { 0%,64%{opacity:0;transform:translateY(7px)} 70%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  @keyframes ap8 { 0%,70%{opacity:0;transform:translateY(7px)} 76%,90%{opacity:1;transform:none} 97%,100%{opacity:0;transform:translateY(-4px)} }
+  .an-1 { animation: ap1 8s infinite both; }
+  .an-2 { animation: ap2 8s infinite both; }
+  .an-3 { animation: ap3 8s infinite both; }
+  .an-4 { animation: ap4 8s infinite both; }
+  .an-5 { animation: ap5 8s infinite both; }
+  .an-6 { animation: ap6 8s infinite both; }
+  .an-7 { animation: ap7 8s infinite both; }
+  .an-8 { animation: ap8 8s infinite both; }
+
+  /* arrows that "flow" between stages */
+  @keyframes dash { to { stroke-dashoffset: -18; } }
+  .an-flow { stroke-dasharray: 5 4; animation: dash 0.9s linear infinite; }
+
+  /* ---------- FLOW STRIP (query -> code -> results) ---------- */
+  .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1.25fr; gap: 12px; align-items: center; }
+  @media (max-width: 860px) { .flow { grid-template-columns: 1fr; } .flow .arrow-col { display: none; } }
+  .fbox {
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+    background: linear-gradient(180deg,#ffffff,#fafbfe); min-height: 118px;
+  }
+  .fbox .fl {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em;
+    font-weight: 700; color: var(--faint); margin-bottom: 9px;
+  }
+  .arrow-col { color: var(--faint); font-size: 20px; text-align: center; }
+  .qchip {
+    display: block; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 11px; font-size: 13.5px; line-height: 1.35;
+  }
+  .qchip + .qchip { margin-top: 8px; }
+  .qchip .who { display: block; font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 3px; }
+
+  .tile {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 9px; border: 1px solid var(--border); font-size: 26px;
+    aspect-ratio: 1 / 1; background: linear-gradient(140deg,#eef3ff,#f8eefb);
+  }
+  .tile.t2 { background: linear-gradient(140deg,#fff2e8,#ffe9f2); }
+  .tile.t3 { background: linear-gradient(140deg,#e9f7f0,#eef3ff); }
+  .tile.t4 { background: linear-gradient(140deg,#f3eeff,#e9f2ff); }
+  .tile.t5 { background: linear-gradient(140deg,#fdf3e2,#f0f4ff); }
+  .tile.hit { border: 2px solid var(--good); box-shadow: 0 0 0 3px var(--good-soft); }
+
+  .ranked { display: grid; gap: 7px; }
+  .rrow { display: grid; grid-template-columns: 26px 40px 1fr auto; gap: 9px; align-items: center; font-size: 12.5px; }
+  .rrow .rk { color: var(--faint); font-weight: 700; text-align: right; font-size: 11.5px; }
+  .rrow .sc { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+  .rrow .nm { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rrow.win .nm { font-weight: 700; color: var(--good); }
+  .badge-hit {
+    font-size: 10.5px; font-weight: 700; color: var(--good); background: var(--good-soft);
+    border: 1px solid #c7e6d7; border-radius: 999px; padding: 1px 7px;
+  }
+
+  /* code strip = the sparse vector */
+  .codestrip { display: flex; align-items: flex-end; gap: 2px; height: 54px; padding: 6px 8px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px; }
+  .codestrip i { flex: 1; background: #d3dbe9; border-radius: 2px 2px 0 0; height: 8%; }
+  .codestrip i.on { background: var(--accent); }
+  .codestrip i.on2 { background: var(--accent-2); }
+  .codemeta { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-top: 7px; font-variant-numeric: tabular-nums; }
+  .ids { font-family: "SFMono-Regular", Menlo, monospace; font-size: 11px; color: var(--accent); margin-top: 6px; word-spacing: 4px; }
+
+  /* ---------- TOPK SIMULATOR ---------- */
+  .topk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 780px) { .topk-grid { grid-template-columns: 1fr; } }
+  .bars { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 120px; padding: 8px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; }
+  .bars b { flex: 1; border-radius: 2px 2px 0 0; background: #c3cddf; height: var(--h); }
+  @keyframes die  { 0%,40%{ height: var(--h); background:#c3cddf } 52%,100%{ height: 5%; background:#e4e9f1 } }
+  @keyframes live { 0%,40%{ height: var(--h); background:#c3cddf } 52%,100%{ height: var(--h); background: var(--accent) } }
+  @keyframes scanner { 0%,30%{ left: 6px; opacity: 0 } 34%{ opacity: 1 } 50%{ left: calc(100% - 14px); opacity: 1 } 56%,100%{ opacity: 0; left: calc(100% - 14px) } }
+  .an-die  { animation: die 8s infinite both; }
+  .an-live { animation: live 8s infinite both; }
+  .an-scanline { position: absolute; top: 4px; bottom: 4px; width: 8px; border-radius: 4px; background: linear-gradient(180deg, rgba(122,61,240,.5), rgba(22,87,208,.5)); animation: scanner 8s infinite both; }
+  .legend-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+  /* ---------- RACE / SHRINK METERS ---------- */
+  .meter { margin-bottom: 20px; }
+  .meter-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; margin-bottom: 6px; gap: 10px; }
+  .meter-top .who { font-weight: 600; }
+  .meter-top .val { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .track { position: relative; height: 22px; border-radius: 6px; background: var(--bg-soft); border: 1px solid var(--border); overflow: hidden; }
+  .fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 5px 0 0 5px; }
+  .fill.dense { background: linear-gradient(90deg,#c8d3e8,#aebbd6); }
+  .fill.sparse { background: linear-gradient(90deg,#1657d0,#7a3df0); }
+  @keyframes raceDense  { 0%,4%{ width: 0 } 88%,100%{ width: 100% } }
+  @keyframes raceSparse { 0%,4%{ width: 0 } 7.5%,100%{ width: 4.1% } }
+  .an-race-d { animation: raceDense 10s infinite both; }
+  .an-race-s { animation: raceSparse 10s infinite both; }
+  @keyframes doneIn { 0%,8%{ opacity: 0; transform: scale(.9) } 13%,96%{ opacity: 1; transform: none } 100%{ opacity: 0 } }
+  .an-done { animation: doneIn 10s infinite both; }
+  .flag { font-size: 11.5px; font-weight: 700; color: var(--good); background: var(--good-soft); border: 1px solid #c7e6d7; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+  .flag.slow { color: var(--muted); background: var(--bg-soft); border-color: var(--border); }
+
+  @keyframes shrinkBar { 0%,14%{ width: 100% } 40%,100%{ width: 4.0% } }
+  .an-shrink { animation: shrinkBar 7s infinite both; }
+  .blockrow { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  .blockrow .lbl { width: 172px; font-size: 13.5px; flex-shrink: 0; }
+  .blockrow .bar { height: 24px; border-radius: 6px; }
+  .blockrow .bar.gray { background: linear-gradient(90deg,#c8d3e8,#b3c0da); }
+  .blockrow .bar.blue { background: linear-gradient(90deg,#1657d0,#7a3df0); }
+  .blockrow .amt { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+  .barwrap { flex: 1; min-width: 160px; }
+
+  /* ---------- ALIGNMENT SIM ---------- */
+  .atoms { display: flex; gap: 3px; height: 30px; align-items: stretch; }
+  .atoms u { flex: 1; border-radius: 3px; background: #e7ebf2; text-decoration: none; }
+  .atoms u.img { background: #f0a04b; }
+  .atoms u.txt { background: #1657d0; }
+  @keyframes moveTxt { 0%,20%{ transform: translateX(0) } 55%,100%{ transform: translateX(calc(var(--dx) * (100% + 3px))) } }
+  .an-move { animation: moveTxt 7s infinite both; }
+  @keyframes joinGlow { 0%,45%{ opacity: 0 } 60%,100%{ opacity: 1 } }
+  .an-join { animation: joinGlow 7s infinite both; }
+
+  /* grow-in-place bar (keeps its own inline width) */
+  @keyframes growX { 0%,6%{ transform: scaleX(0) } 55%,100%{ transform: scaleX(1) } }
+  .an-grow { transform-origin: left center; animation: growX 6s infinite both; }
+
+  /* ---------- SCOREBOARD ---------- */
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 12px; }
+  .bcard { border: 1px solid var(--border); border-radius: 14px; padding: 16px; background: #fff; }
+  .bcard.win { border-color: #bfe3d1; background: linear-gradient(180deg,#fff,#f4fbf7); }
+  .bcard.tie { border-color: #d6def7; background: linear-gradient(180deg,#fff,#f8faff); }
+  .bcard.loss { border-color: #f3cbc7; background: linear-gradient(180deg,#fff,#fdf6f5); }
+  .bcard .ds { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+  .bcard .verdict { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 9px; border-radius: 999px; display: inline-block; margin-bottom: 10px; }
+  .bcard.win .verdict { color: var(--good); background: var(--good-soft); border: 1px solid #c7e6d7; }
+  .bcard.tie .verdict { color: var(--accent); background: var(--accent-soft); border: 1px solid #c6d6f5; }
+  .bcard.loss .verdict { color: var(--bad); background: var(--bad-soft); border: 1px solid #f3cbc7; }
+  .bcard .nums { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bcard .nums b { color: var(--fg); }
+
+  /* ---------- TABLES & DETAILS ---------- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; margin: 0; font-size: 13.5px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { font-weight: 600; background: var(--bg-soft); }
+  tbody tr:hover { background: #fafbfe; }
+  tbody tr:last-child td { border-bottom: none; }
+  table.compact { font-size: 13px; }
+  caption { caption-side: bottom; text-align: left; color: var(--muted); font-size: 13px; padding: 8px 4px 0; }
+  .group-sep { border-left: 1px solid var(--border); }
+  tr.block-start td, tr.block-start th { border-top: 1px solid var(--border); }
+  td.rowhead { font-weight: 600; white-space: nowrap; }
+  .up { color: var(--good); font-weight: 600; }
+  .down { color: var(--bad); font-weight: 600; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+
+  details {
+    border: 1px solid var(--border); border-radius: 12px; background: #fff;
+    padding: 0 18px; margin: 14px 0;
+  }
+  details[open] { padding-bottom: 18px; background: linear-gradient(180deg,#fbfcfe,#fff); }
+  summary {
+    cursor: pointer; padding: 14px 0; font-weight: 600; font-size: 14.5px;
+    list-style: none; display: flex; align-items: center; gap: 9px; color: var(--accent);
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; font-size: 12px; transition: transform .15s ease; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  summary:hover { color: #0c45ab; }
+  details .table-wrap { margin-bottom: 6px; }
+
+  figure { margin: 18px 0 8px; }
+  /* direct children only — MathJax renders its own <svg> inside captions and must not be stretched */
+  figure > svg, figure > img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
+  figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; text-align: center; }
+  mjx-container svg { display: inline !important; width: auto !important; border: none !important; background: none !important; border-radius: 0 !important; }
+
+  .eq-card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin: 10px 0 14px; }
+  .eq-card .eq { font-size: 17px; text-align: center; padding: 6px 0 2px; overflow-x: auto; }
+  .eq-card .legend { color: var(--muted); font-size: 13.5px; margin-top: 8px; }
+
+  pre { background: #0e1320; color: #e7ebf5; border-radius: 10px; padding: 16px 18px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { color: inherit; }
+  p code, li code, td code, summary code { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 0.92em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+
+  .cta {
+    background: linear-gradient(135deg, #0f2dad 0%, #5a1ec6 100%);
+    color: #fff; border-radius: 18px; padding: 34px 30px; text-align: center;
+  }
+  .cta h2 { color: #fff; margin-bottom: 8px; }
+  .cta p { color: #d8e0fb; max-width: 620px; margin: 0 auto 20px; }
+  .cta .btn { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .cta .btn:hover { background: #fff; color: #0f2dad; border-color: #fff; }
+
+  footer {
+    margin-top: 70px; padding: 28px 0 36px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 13px; text-align: center; background: var(--bg-soft);
+  }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 34px; }
+    h2 { font-size: 24px; }
+    .lede { font-size: 17px; }
+    .hero { padding: 40px 0 28px; }
+    main { padding: 44px 0 50px; }
+    body { font-size: 16px; }
+    .blockrow .lbl { width: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .an-1,.an-2,.an-3,.an-4,.an-5,.an-6,.an-7,.an-8 { opacity: 1 !important; transform: none !important; }
+    .an-die { height: 5% !important; background: #e4e9f1 !important; }
+    .an-live { background: var(--accent) !important; }
+    .an-race-d { width: 100% !important; }
+    .an-race-s { width: 4.1% !important; }
+    .an-shrink { width: 4% !important; }
+    .an-done, .an-join { opacity: 1 !important; }
+    .an-grow { transform: none !important; }
+    .an-move { transform: translateX(calc(var(--dx) * (100% + 3px))) !important; }
+    .an-scanline { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <span class="eyebrow">PUMA · post-hoc sparsification</span>
+    <h1>Same multimodal retriever.<br /><span class="grad">16× smaller. 25× faster.</span></h1>
+    <p class="lede">
+      You already have a universal multimodal embedder that handles text, image, and composed queries.
+      <strong>PUMA compresses what it produces</strong> &mdash; turning dense vectors into sparse retrieval
+      codes, <strong>without retraining the backbone</strong> and without giving up accuracy.
+    </p>
+
+    <div class="actions">
+      <!-- Swap for the arXiv / ACL Anthology link once it is live. -->
+      <a class="btn primary" href="assets/PUMA.pdf">📄 Read the paper</a>
+      <a class="btn" href="https://github.com/sisinflab/PUMA">💻 Get the code</a>
+      <a class="btn" href="#idea">▶ See how it works</a>
+    </div>
+
+    <p class="papertitle">
+      <em>PUMA: Post-Hoc Sparsification of Universal Multimodal Embeddings for Efficient Retrieval</em>
+    </p>
+    <p class="authors">
+      <span class="a"><strong>Matteo Attimonelli</strong><sup>🦪🏦</sup></span> ·
+      <span class="a"><strong>Alessandro De Bellis</strong><sup>🦪†</sup></span> ·
+      <span class="a"><strong>Franco Maria Nardini</strong><sup>🏛</sup></span> ·
+      <span class="a"><strong>Claudio Pomo</strong><sup>🦪</sup></span> ·
+      <span class="a"><strong>Cosimo Rulli</strong><sup>🏛</sup></span> ·
+      <span class="a"><strong>Rossano Venturini</strong><sup>🗼</sup></span> ·
+      <span class="a"><strong>Tommaso Di Noia</strong><sup>🦪</sup></span>
+    </p>
+    <p class="affil">
+      <span class="a">🦪 Politecnico di Bari</span>
+      <span class="a">🏦 Sapienza University of Rome</span>
+      <span class="a">🏛 ISTI–CNR, Pisa</span>
+      <span class="a">🗼 University of Pisa</span>
+    </p>
+    <p class="corr">Contact: <code>matteo.attimonelli@poliba.it</code> &nbsp;·&nbsp; <span style="font-size:12px">† Work done while at Politecnico di Bari; currently Independent Researcher.</span></p>
+  </div>
+</div>
+
+<nav class="nav">
+  <div class="wrap">
+    <a href="#problem">The problem</a>
+    <a href="#idea">The idea</a>
+    <a href="#flows">Query flows</a>
+    <a href="#shrink">Watch it shrink</a>
+    <a href="#race">Watch it race</a>
+    <a href="#why">Why accuracy holds</a>
+    <a href="#scoreboard">Scoreboard</a>
+    <a href="#ruled-out">What we ruled out</a>
+    <a href="#knob">Sparsity knob</a>
+    <a href="#breaks">When it breaks</a>
+    <a href="#hood">Under the hood</a>
+    <a href="#start">Get started</a>
+  </div>
+</nav>
+
+<main>
+<div class="wrap">
+
+<!-- ========================= PROBLEM ========================= -->
+<section id="problem">
+  <span class="kicker">The problem</span>
+  <h2>One backbone for every modality &mdash; and one very expensive index</h2>
+  <p class="sub">
+    Universal multimodal embedders are a great deal: one model, one shared space, any query type.
+    The bill arrives at serving time.
+  </p>
+  <div class="cards">
+    <div class="card">
+      <span class="step">Storage</span>
+      <h3>16 KB per vector</h3>
+      <p>A single Qwen3-VL-Embedding-8B vector is 4096 FP32 floats. Multiply by a 542K-image catalogue and the index alone is measured in gigabytes &mdash; before you add replicas.</p>
+    </div>
+    <div class="card">
+      <span class="step warn">Latency</span>
+      <h3>7 minutes per exact scan</h3>
+      <p>Exact dense scoring is $O(nd)$. On VisualNews (542K candidates) at 8B, one exhaustive pass takes <strong>423.8 s</strong>. Approximate indexes help &mdash; at the cost of accuracy and a whole extra system to tune.</p>
+    </div>
+    <div class="card">
+      <span class="step bad">Retraining</span>
+      <h3>Not an option</h3>
+      <p>The obvious fix &mdash; train a sparse retriever from scratch &mdash; throws away the generality you paid for, and the compute bill for a multimodal backbone is enormous.</p>
+    </div>
+  </div>
+  <p class="note">So the question PUMA asks is: <strong>can you sparsify a frozen embedder after the fact, and keep the rankings?</strong></p>
+</section>
+
+<!-- ========================= THE IDEA ========================= -->
+<section id="idea">
+  <span class="kicker">The idea</span>
+  <h2>Keep the model. Rewrite the vectors.</h2>
+  <p class="sub">
+    PUMA sits <em>after</em> the embedder. Dense vectors go in; codes with exactly <em>k</em> active
+    features come out. Nothing upstream changes.
+  </p>
+
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Dense vector → TopK sparse code</span>
+      <span class="live">Live simulation</span>
+    </div>
+    <div class="topk-grid">
+      <div>
+        <div class="fl" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;color:var(--faint);margin-bottom:9px">① Encoder pre-activations &nbsp;<span style="text-transform:none;letter-spacing:0;font-weight:400">h = ReLU(W·x + b)</span></div>
+        <div class="bars">
+          <div class="an-scanline"></div>
+          <b class="an-die"  style="--h:38%"></b>
+          <b class="an-die"  style="--h:19%"></b>
+          <b class="an-live" style="--h:88%"></b>
+          <b class="an-die"  style="--h:31%"></b>
+          <b class="an-die"  style="--h:12%"></b>
+          <b class="an-die"  style="--h:44%"></b>
+          <b class="an-live" style="--h:74%"></b>
+          <b class="an-die"  style="--h:26%"></b>
+          <b class="an-die"  style="--h:51%"></b>
+          <b class="an-die"  style="--h:17%"></b>
+          <b class="an-live" style="--h:95%"></b>
+          <b class="an-die"  style="--h:35%"></b>
+          <b class="an-die"  style="--h:22%"></b>
+          <b class="an-die"  style="--h:48%"></b>
+          <b class="an-die"  style="--h:14%"></b>
+          <b class="an-live" style="--h:81%"></b>
+          <b class="an-die"  style="--h:29%"></b>
+          <b class="an-die"  style="--h:41%"></b>
+          <b class="an-die"  style="--h:16%"></b>
+          <b class="an-die"  style="--h:33%"></b>
+          <b class="an-live" style="--h:69%"></b>
+          <b class="an-die"  style="--h:24%"></b>
+          <b class="an-die"  style="--h:46%"></b>
+          <b class="an-die"  style="--h:11%"></b>
+          <b class="an-die"  style="--h:37%"></b>
+          <b class="an-live" style="--h:77%"></b>
+          <b class="an-die"  style="--h:21%"></b>
+          <b class="an-die"  style="--h:43%"></b>
+        </div>
+        <div class="legend-row">
+          <span><i class="swatch" style="background:#c3cddf"></i>candidate feature</span>
+          <span><i class="swatch" style="background:var(--accent)"></i>survives TopK</span>
+          <span><i class="swatch" style="background:#e4e9f1"></i>dropped &mdash; never stored</span>
+        </div>
+      </div>
+      <div>
+        <div class="fl" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;color:var(--faint);margin-bottom:9px">② What actually gets written to the index</div>
+        <div class="ids an-4" style="font-size:12px;line-height:2">
+          <span>#0412</span> <span>#3187</span> <span>#0088</span> <span>#7301</span> <span>#1244</span> <span>#9640</span> …
+        </div>
+        <p style="font-size:14px;color:var(--muted);margin-top:12px">
+          Only <strong>k</strong> (feature&nbsp;id, weight) pairs per vector &mdash; typically
+          <strong>128&ndash;160</strong> out of a learned dictionary of <strong>32,768</strong>.
+          Scoring is a sparse dot product over overlapping ids, so it reuses the machinery inverted
+          indexes have been optimised for over decades.
+        </p>
+        <div class="codemeta" style="margin-top:14px">
+          <span>Dense · 2048 floats · <strong>8,192 B</strong></span>
+          <span style="color:var(--accent)">PUMA · k=128 · <strong>656 B</strong></span>
+        </div>
+      </div>
+    </div>
+    <p class="viz-cap">
+      The animation shows a 28-feature slice of the real 32,768-wide dictionary. TopK is a hard
+      selection: everything outside the top <em>k</em> is discarded, so the code size is fixed and
+      known in advance &mdash; no per-vector variance to budget for.
+    </p>
+  </div>
+
+  <div class="cards" style="margin-top:22px">
+    <div class="card">
+      <span class="step">Stage ①</span>
+      <h3>Cache once</h3>
+      <p>Run the frozen backbone over your corpus a single time and keep the dense vectors. Everything after this is cheap and never touches the backbone again.</p>
+    </div>
+    <div class="card">
+      <span class="step">Stage ②</span>
+      <h3>Learn the dictionary</h3>
+      <p>Train a TopK sparse autoencoder that is explicitly taught to <em>preserve the dense dot product</em> &mdash; not just to reconstruct the vector.</p>
+    </div>
+    <div class="card">
+      <span class="step">Stage ③</span>
+      <h3>Tune for ranking</h3>
+      <p>Fine-tune the encoder contrastively using the exact sparse dot product you will serve with. Train-time and serve-time scoring finally agree.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= QUERY FLOWS ========================= -->
+<section id="flows">
+  <span class="kicker">Query flows</span>
+  <h2>Two very different queries. One frozen backbone. One sparse index.</h2>
+  <p class="sub">
+    This is what makes universal embedders worth keeping &mdash; and what makes them hard to sparsify.
+    Watch both paths run end to end.
+  </p>
+
+  <!-- FLOW 1 -->
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Flow A · Text-to-image retrieval</span>
+      <span class="viz-note">MSCOCO / VisualNews / Fashion200K regime</span>
+    </div>
+    <div class="flow">
+      <div class="fbox an-1">
+        <div class="fl">① Query</div>
+        <span class="qchip"><span class="who">💬 text</span>“a red double-decker bus crossing a bridge”</span>
+      </div>
+      <div class="arrow-col an-2">
+        <svg viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path class="an-flow" d="M2,12 H34" stroke="#8a93a3" stroke-width="2" fill="none"/><path d="M32,7 L38,12 L32,17" stroke="#8a93a3" stroke-width="2" fill="none"/></svg>
+        <div style="font-size:10px;color:var(--faint);letter-spacing:.08em">🧊 FROZEN</div>
+      </div>
+      <div class="fbox an-3">
+        <div class="fl">② PUMA sparse code</div>
+        <div class="codestrip">
+          <i style="height:12%"></i><i class="on" style="height:78%"></i><i style="height:9%"></i><i style="height:14%"></i>
+          <i class="on2" style="height:92%"></i><i style="height:8%"></i><i style="height:11%"></i><i class="on" style="height:64%"></i>
+          <i style="height:10%"></i><i style="height:13%"></i><i class="on" style="height:85%"></i><i style="height:9%"></i>
+          <i style="height:12%"></i><i class="on2" style="height:57%"></i><i style="height:8%"></i><i class="on" style="height:71%"></i>
+          <i style="height:11%"></i><i style="height:9%"></i>
+        </div>
+        <div class="codemeta"><span>k = 144 active</span><span style="color:var(--accent)">656 B</span></div>
+        <div class="ids">#0412 #3187 #0088 #7301 …</div>
+      </div>
+      <div class="arrow-col an-4">
+        <svg viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path class="an-flow" d="M2,12 H34" stroke="#8a93a3" stroke-width="2" fill="none"/><path d="M32,7 L38,12 L32,17" stroke="#8a93a3" stroke-width="2" fill="none"/></svg>
+        <div style="font-size:10px;color:var(--faint);letter-spacing:.08em">SPARSE ·</div>
+      </div>
+      <div class="fbox">
+        <div class="fl an-4">③ Ranked candidates</div>
+        <div class="ranked">
+          <div class="rrow win an-5"><span class="rk">1</span><span class="tile t2 hit">🚌</span><span class="nm">img&nbsp;#84 211</span><span class="badge-hit">✓ target</span></div>
+          <div class="rrow an-6"><span class="rk">2</span><span class="tile">🏙</span><span class="nm">img&nbsp;#12 087</span><span class="sc">0.71</span></div>
+          <div class="rrow an-7"><span class="rk">3</span><span class="tile t4">🚕</span><span class="nm">img&nbsp;#55 903</span><span class="sc">0.66</span></div>
+          <div class="rrow an-8"><span class="rk">4</span><span class="tile t3">🌉</span><span class="nm">img&nbsp;#31 664</span><span class="sc">0.62</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="viz-cap">
+      The standard cross-modal setting: a text query has to reach image candidates through the shared space.
+      <strong>PUMA is statistically indistinguishable from dense retrieval on MSCOCO</strong> and beats it on Fashion200K.
+    </p>
+  </div>
+
+  <!-- FLOW 2 -->
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Flow B · Composed image retrieval &mdash; the hard one</span>
+      <span class="viz-note">CIRR / FashionIQ regime</span>
+    </div>
+    <div class="flow">
+      <div class="fbox an-1">
+        <div class="fl">① Composed query</div>
+        <span class="qchip"><span class="who">🖼 reference image</span><span style="display:inline-flex;align-items:center;gap:8px"><span class="tile" style="width:32px;height:32px;aspect-ratio:auto;font-size:17px">👜</span> black leather handbag</span></span>
+        <span class="qchip"><span class="who">💬 modification</span>“make it pink and add a chain strap”</span>
+      </div>
+      <div class="arrow-col an-2">
+        <svg viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path class="an-flow" d="M2,12 H34" stroke="#8a93a3" stroke-width="2" fill="none"/><path d="M32,7 L38,12 L32,17" stroke="#8a93a3" stroke-width="2" fill="none"/></svg>
+        <div style="font-size:10px;color:var(--faint);letter-spacing:.08em">🧊 FUSED</div>
+      </div>
+      <div class="fbox an-3">
+        <div class="fl">② One sparse code for both inputs</div>
+        <div class="codestrip">
+          <i class="on" style="height:66%"></i><i style="height:10%"></i><i style="height:13%"></i><i class="on2" style="height:88%"></i>
+          <i style="height:9%"></i><i class="on" style="height:73%"></i><i style="height:12%"></i><i style="height:8%"></i>
+          <i class="on2" style="height:95%"></i><i style="height:11%"></i><i class="on" style="height:59%"></i><i style="height:10%"></i>
+          <i style="height:14%"></i><i style="height:9%"></i><i class="on" style="height:80%"></i><i style="height:12%"></i>
+          <i class="on2" style="height:68%"></i><i style="height:8%"></i>
+        </div>
+        <div class="codemeta"><span>k = 160 active</span><span style="color:var(--accent)">656 B</span></div>
+        <div class="ids">#2210 #0088 #6417 #0973 …</div>
+      </div>
+      <div class="arrow-col an-4">
+        <svg viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path class="an-flow" d="M2,12 H34" stroke="#8a93a3" stroke-width="2" fill="none"/><path d="M32,7 L38,12 L32,17" stroke="#8a93a3" stroke-width="2" fill="none"/></svg>
+        <div style="font-size:10px;color:var(--faint);letter-spacing:.08em">SPARSE ·</div>
+      </div>
+      <div class="fbox">
+        <div class="fl an-4">③ Ranked candidates</div>
+        <div class="ranked">
+          <div class="rrow win an-5"><span class="rk">1</span><span class="tile t2 hit">👛</span><span class="nm">img&nbsp;#07 442</span><span class="badge-hit">✓ target</span></div>
+          <div class="rrow an-6"><span class="rk">2</span><span class="tile t4">👝</span><span class="nm">img&nbsp;#19 006</span><span class="sc">0.58</span></div>
+          <div class="rrow an-7"><span class="rk">3</span><span class="tile">👜</span><span class="nm">img&nbsp;#02 318</span><span class="sc">0.54</span></div>
+          <div class="rrow an-8"><span class="rk">4</span><span class="tile t5">🎒</span><span class="nm">img&nbsp;#41 570</span><span class="sc">0.49</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="viz-cap">
+      Here the sparse code has to carry the reference image <em>and</em> the edit &mdash; a semantics that
+      lives in the interaction between the two, not in either one. It is the regime where naive
+      sparsification falls apart, and where
+      <strong>PUMA significantly beats dense retrieval on CIRR</strong> <span style="white-space:nowrap">(nDCG@10 .4235 → .4356, $p \le 0.001$)</span>.
+    </p>
+  </div>
+  <p class="note">
+    Tiles are stylised stand-ins, not dataset images &mdash; the queries, ranks, and behaviour they
+    illustrate follow the CIRR / FashionIQ / MSCOCO task definitions. Reported metrics are measured; per-item scores shown in the mock-ups are illustrative.
+  </p>
+</section>
+
+<!-- ========================= SHRINK ========================= -->
+<section id="shrink">
+  <span class="kicker">Watch it shrink</span>
+  <h2>16,384 bytes → 656 bytes</h2>
+  <p class="sub">
+    Per vector, at the operating points we actually ship. Bars are to scale.
+  </p>
+
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Per-vector index footprint, Qwen3-VL-Embedding-8B ($k=128$)</span>
+      <span class="live">Live simulation</span>
+    </div>
+
+    <div class="blockrow">
+      <span class="lbl">Dense FP32 <span style="color:var(--faint)">(4d)</span></span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:100%"></span></span>
+      <span class="amt">16,384 B · 1×</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Dense FP16 <span style="color:var(--faint)">(2d)</span></span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:50%"></span></span>
+      <span class="amt">8,192 B · 2×</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Dense INT8 <span style="color:var(--faint)">(d)</span></span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:25%"></span></span>
+      <span class="amt">4,096 B · 4×</span>
+    </div>
+    <div class="blockrow" style="margin-top:20px;padding-top:18px;border-top:1px dashed var(--border)">
+      <span class="lbl" style="font-weight:700;color:var(--accent)">PUMA sparse code</span>
+      <span class="barwrap"><span class="bar blue an-shrink" style="display:block;width:100%"></span></span>
+      <span class="amt" data-count-loop="7000" data-count-from="16384" data-count-to="656" data-count-start="0.14" data-count-end="0.40" data-count-suffix=" B">656 B</span>
+    </div>
+
+    <p class="viz-cap">
+      Quantisation is <em>complementary</em>, not competing: FP16 and INT8 dense are essentially lossless
+      here (nDCG@10 moves by at most 0.001), and PUMA is still smaller than INT8 dense &mdash; 656 B
+      against 4,096 B at 8B. The sparse weights can be quantised too, so this accounting is conservative.
+    </p>
+  </div>
+
+  <details>
+    <summary>Full storage accounting, both backbones</summary>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Representation</th><th>Qwen-2B (B)</th><th>Qwen-8B (B)</th><th>vs full dense</th></tr></thead>
+        <tbody>
+          <tr><td>Full dense ($4d$, FP32)</td><td>8192</td><td>16384</td><td>1&times;</td></tr>
+          <tr><td>Full dense ($2d$, FP16)</td><td>4096</td><td>8192</td><td>2&times;</td></tr>
+          <tr><td>Full dense ($d$, INT8)</td><td>2048</td><td>4096</td><td>4&times;</td></tr>
+          <tr><td>Trained dense AE ($2k$, FP32)</td><td>1024</td><td>1024</td><td>8 / 16&times;</td></tr>
+          <tr><td>PUMA, 32-bit ids ($8k$)</td><td>1024</td><td>1024</td><td>8 / 16&times;</td></tr>
+          <tr><td>PUMA, 16-bit ids ($6k$)</td><td>768</td><td>768</td><td>10.7 / 21.3&times;</td></tr>
+          <tr><td>PUMA, 9-bit ids</td><td>656</td><td>656</td><td>12.5 / 25.0&times;</td></tr>
+          <tr><td>PUMA, 8-bit ids</td><td>&mdash;</td><td>640</td><td>&mdash; / 25.6&times;</td></tr>
+        </tbody>
+        <caption>Feature ids only need to address atoms that actually appear in the candidate pool. At most 497 atoms are ever active in our measurements, so 9-bit ids suffice; 8-bit applies when $D_{\text{active}} \le 256$. The headline 8&ndash;16&times; figure uses the conservative 32-bit accounting and holds regardless of that remapping.</caption>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= RACE ========================= -->
+<section id="race">
+  <span class="kicker">Watch it race</span>
+  <h2>Same 542K candidates. Same exact scoring. 24.5× the speed.</h2>
+  <p class="sub">
+    Both bars advance on one shared clock. Sparse finishes before dense has visibly started.
+  </p>
+
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Exact search over VisualNews · 542,246 candidates · Qwen-8B</span>
+      <span class="live">Live simulation</span>
+    </div>
+
+    <div class="meter">
+      <div class="meter-top">
+        <span class="who">Exact dense scoring</span>
+        <span class="val"><span data-count-loop="10000" data-count-from="0" data-count-to="423.8" data-count-start="0.04" data-count-end="0.88" data-count-dec="1" data-count-suffix=" s">423.8 s</span></span>
+      </div>
+      <div class="track"><span class="fill dense an-race-d"></span></div>
+    </div>
+
+    <div class="meter">
+      <div class="meter-top">
+        <span class="who" style="color:var(--accent)">PUMA sparse scoring</span>
+        <span class="val">
+          <span data-count-loop="10000" data-count-from="0" data-count-to="17.3" data-count-start="0.04" data-count-end="0.075" data-count-dec="1" data-count-suffix=" s">17.3 s</span>
+          &nbsp;<span class="flag an-done">✓ done · 24.5× faster</span>
+        </span>
+      </div>
+      <div class="track"><span class="fill sparse an-race-s"></span></div>
+    </div>
+
+    <div style="border-top:1px dashed var(--border);margin-top:22px;padding-top:18px">
+      <div class="meter" style="margin-bottom:12px">
+        <div class="meter-top">
+          <span class="who" style="font-size:13px">Fashion200K · 201,824 candidates</span>
+          <span class="val">dense <strong>13.8 s</strong> → sparse <strong style="color:var(--accent)">0.77 s</strong> &nbsp;<span class="flag">17.9× faster</span></span>
+        </div>
+      </div>
+      <div class="meter" style="margin-bottom:0">
+        <div class="meter-top">
+          <span class="who" style="font-size:13px">MSCOCO · 5,000 candidates</span>
+          <span class="val">dense wins &mdash; the pool is too small to amortise sparse-kernel overhead &nbsp;<span class="flag slow">honest caveat</span></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="viz-cap">
+      Exact dense against exact sparse, so the comparison isolates the representation rather than an
+      index. The advantage grows with the candidate pool &mdash; which is exactly the direction real
+      catalogues move in.
+    </p>
+  </div>
+</section>
+
+<!-- ========================= WHY IT WORKS ========================= -->
+<section id="why">
+  <span class="kicker">Why accuracy holds</span>
+  <h2>Three things a plain sparse autoencoder gets wrong</h2>
+  <p class="sub">
+    Reconstruction is not ranking. PUMA's recipe is three targeted fixes &mdash; and the ablations show
+    all three are load-bearing.
+  </p>
+
+  <div class="cards">
+    <div class="card">
+      <span class="step">Fix 1</span>
+      <h3>Distil the dot product</h3>
+      <p>A reconstruction loss optimises the wrong thing. PUMA additionally forces the <em>sparse</em> score to match the <em>dense</em> score for every query–candidate pair, so the ranking geometry survives compression.</p>
+      <p><span class="down">−.036 nDCG@10</span> on CIRR when the related AuxK term is removed.</p>
+    </div>
+    <div class="card">
+      <span class="step">Fix 2</span>
+      <h3>Force a shared vocabulary</h3>
+      <p>Left alone, the dictionary splits: some atoms fire only for images, others only for text. Cross-modal scoring then compares two disjoint alphabets. PUMA penalises exactly that.</p>
+      <p><span class="down">−.026 nDCG@10</span> on CIRR without the alignment loss.</p>
+    </div>
+    <div class="card">
+      <span class="step">Fix 3</span>
+      <h3>Revive dead features</h3>
+      <p>TopK only sends gradient to the <em>k</em> selected atoms, so the other 32,000+ quietly die and your dictionary shrinks to nothing. AuxK asks dead atoms to explain the leftover residual.</p>
+      <p><span class="down">−.029 nDCG@10</span> on Fashion200K without the contrastive blend.</p>
+    </div>
+  </div>
+
+  <div class="viz anim" style="margin-top:26px">
+    <div class="viz-head">
+      <span class="viz-title">Fix 2 in action · image and text codes converge on the same atoms</span>
+      <span class="live">Live simulation</span>
+    </div>
+    <div style="display:grid;gap:12px;max-width:760px">
+      <div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:5px">🖼 image code — active atoms</div>
+        <div class="atoms">
+          <u></u><u></u><u class="img"></u><u></u><u></u><u class="img"></u><u></u><u></u><u class="img"></u><u></u><u></u><u class="img"></u><u></u><u></u><u></u><u></u><u></u><u></u><u></u><u></u>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:5px">💬 text code — active atoms</div>
+        <div class="atoms">
+          <u></u><u></u><u></u><u></u><u></u><u></u><u></u><u></u><u class="txt an-move" style="--dx:-6"></u><u></u><u></u><u class="txt an-move" style="--dx:-6"></u><u></u><u></u><u class="txt an-move" style="--dx:-6"></u><u></u><u></u><u class="txt an-move" style="--dx:-6"></u><u></u><u></u>
+        </div>
+      </div>
+      <div class="an-join" style="display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-top:6px">
+        <span style="font-size:13.5px">Support overlap (Jaccard) on CIRR:</span>
+        <span style="font-size:13.5px;color:var(--muted)">random pairs <strong>0.174</strong></span>
+        <span style="font-size:20px;color:var(--faint)">→</span>
+        <span style="font-size:13.5px;color:var(--good);font-weight:700">paired query &amp; target 0.351 &nbsp;(+0.177)</span>
+      </div>
+    </div>
+    <p class="viz-cap">
+      Measured on trained PUMA-2B checkpoints at $k = 128$. The lift is largest on the two
+      composed-retrieval datasets &mdash; exactly where the alignment loss is supervised on genuinely
+      cross-modal pairs. Fewer than 500 atoms ever fire, two orders of magnitude below the trainable
+      $D = 32{,}768$.
+    </p>
+  </div>
+
+  <details>
+    <summary>The full objective, loss weights, and leave-one-out ablations</summary>
+
+    <p>Stage ② optimises five terms; Stage ③ switches the emphasis to ranking:</p>
+    <div class="eq-card">
+      <div class="eq">
+        $$\mathcal{L}_2 = \mathcal{L}_{\text{rec}} + \lambda_a \mathcal{L}_{\text{align}} + \lambda_d \mathcal{L}_{\text{dist}} + \lambda_x \mathcal{L}_{\text{aux}} + \lambda_c \mathcal{L}_{\text{ctr}}
+        \qquad
+        \mathcal{L}_3 = \mathcal{L}_{\text{ctr}} + \alpha \mathcal{L}_{\text{rec}} + \beta \mathcal{L}_{\text{dist}}$$
+      </div>
+      <p class="legend" style="margin-bottom:0">with $\alpha = 0.1$ and $\beta = 0.05$ in the main experiments.</p>
+    </div>
+    <ul>
+      <li><strong>Reconstruction</strong> — $\mathcal{L}_{\text{rec}} = 1 - \cos(x, \hat{x})$, on both query and candidate embeddings.</li>
+      <li><strong>Dot-product distillation</strong> — $\mathcal{L}_{\text{dist}} = \big(g(q)^\top g(d) - q^\top d\big)^2$.</li>
+      <li><strong>Cross-modal alignment</strong> — $\lVert m_{\text{img}} - m_{\text{txt}} \rVert_1$ over TopK support masks, plus magnitude alignment on co-active atoms. Gradients reach the selected pre-TopK activations through the same straight-through treatment as TopK itself.</li>
+      <li><strong>AuxK feature revival</strong> — atoms inactive for more than $T$ steps reconstruct the residual $x - \hat{x}$ under a stop-gradient, so only dead atoms are updated by the term.</li>
+      <li><strong>Contrastive blend</strong> — a small InfoNCE term already during pretraining.</li>
+      <li><strong>Progressive $k$-annealing</strong> — start at a larger $k_{\text{init}}$, anneal linearly to the target $k_{\text{final}}$.</li>
+    </ul>
+
+    <h3>Loss weights — fixed across every dataset and backbone</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Weight</th><th>Value</th><th style="text-align:left">Role</th></tr></thead>
+        <tbody>
+          <tr><td>$\lambda_a = \lambda_d$</td><td>0.3</td><td style="text-align:left">Alignment / dot-product distillation</td></tr>
+          <tr><td>$\lambda_x$</td><td>1/32</td><td style="text-align:left">AuxK feature revival</td></tr>
+          <tr><td>$\lambda_c$</td><td>0.05</td><td style="text-align:left">Stage ② InfoNCE blend</td></tr>
+          <tr><td>$\alpha$</td><td>0.1</td><td style="text-align:left">Stage ③ reconstruction regulariser</td></tr>
+          <tr><td>$\beta$</td><td>0.05</td><td style="text-align:left">Stage ③ distillation regulariser</td></tr>
+          <tr><td>$\tau$</td><td>0.05</td><td style="text-align:left">InfoNCE temperature</td></tr>
+        </tbody>
+        <caption>One configuration reused unchanged everywhere — no per-dataset tuning.</caption>
+      </table>
+    </div>
+
+    <h3>Leave-one-out at Qwen-2B, $k = 128$</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variant</th><th>CIRR n@10</th><th>Δ</th><th>Fashion200K n@10</th><th>Δ</th></tr></thead>
+        <tbody>
+          <tr><td>Dense</td><td>.4235</td><td>&mdash;</td><td>.0792</td><td>&mdash;</td></tr>
+          <tr><td><strong>PUMA (full)</strong></td><td><strong>.4333</strong></td><td>&mdash;</td><td><strong>.1144</strong></td><td>&mdash;</td></tr>
+          <tr class="block-start"><td>− $\mathcal{L}_{\text{align}}$ (cross-modal alignment)</td><td>.4072</td><td class="down">−.026</td><td>.1009</td><td class="down">−.014</td></tr>
+          <tr><td>− $\mathcal{L}_{\text{aux}}$ (AuxK revival)</td><td>.3975</td><td class="down">−.036</td><td>.0995</td><td class="down">−.015</td></tr>
+          <tr><td>− $\mathcal{L}^{(2)}_{\text{ctr}}$ (Stage ② contrastive blend)</td><td>.4061</td><td class="down">−.027</td><td>.0857</td><td class="down">−.029</td></tr>
+          <tr class="block-start"><td>Stage ③ OFF (no contrastive fine-tuning)</td><td>.4140</td><td class="down">−.019</td><td>.1050</td><td class="down">−.009</td></tr>
+        </tbody>
+        <caption>On CIRR <em>every</em> single ablation drops PUMA below dense, with AuxK revival costing the most; on Fashion200K the Stage ② contrastive blend matters most, and every variant still clears the dense reference.</caption>
+      </table>
+    </div>
+    <p style="margin-top:14px">
+      <strong>Stage ③.</strong> Removing contrastive fine-tuning costs .4333 → .4140 on CIRR and
+      .1144 → .1050 on Fashion200K at Qwen-2B, and .1922 → .1883 on Qwen-8B FashionIQ. On Qwen-8B CIRR
+      at the matched $k = 144$ point, full PUMA gets .4835 versus .4793 without Stage ③ — not
+      statistically significant ($p = .115$), consistent with that setting being support-limited before TopK.
+    </p>
+
+    <h3>Coefficient sensitivity (Qwen-2B, $k = 128$)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Stage</th><th style="text-align:left">Perturbations</th><th>CIRR</th><th>Fashion200K</th></tr></thead>
+        <tbody>
+          <tr><td>Dense reference</td><td style="text-align:left">&mdash;</td><td>.4235</td><td>.0792</td></tr>
+          <tr><td>Stage ② auxiliaries</td><td style="text-align:left">0, 0.5&times;, 2&times;</td><td>.4107 – .4272</td><td>.0871 – .1090</td></tr>
+          <tr><td>Stage ③ regularisers</td><td style="text-align:left">0, 0.5&times;, 2&times;, 4&times;</td><td>.4302 – .4318</td><td>.1240 – .1254</td></tr>
+        </tbody>
+        <caption>Min–max test nDCG@10 across each sweep, not the best perturbation. Stage ② is the more sensitive stage, yet the method stays stable under zeroing and twofold perturbation, and every Fashion200K variant stays above the dense reference.</caption>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= SCOREBOARD ========================= -->
+<section id="scoreboard">
+  <span class="kicker">Does it hold up?</span>
+  <h2>Five benchmarks. Four wins or ties. One honest loss.</h2>
+  <p class="sub">
+    Qwen3-VL-Embedding-2B, nDCG@10, judged with 95% bootstrap intervals and 1000-trial paired
+    approximate-randomisation tests. We report the loss too.
+  </p>
+
+  <div class="board">
+    <div class="bcard win">
+      <div class="ds">CIRR</div>
+      <span class="verdict">✓ PUMA wins</span>
+      <div class="nums">dense .4235 → <b>.4356</b><br />$p \le 0.001$ · composed retrieval</div>
+    </div>
+    <div class="bcard win">
+      <div class="ds">Fashion200K</div>
+      <span class="verdict">✓ PUMA wins</span>
+      <div class="nums">dense .0792 → <b>.1144</b><br />$p \le 0.001$ · +44% relative</div>
+    </div>
+    <div class="bcard tie">
+      <div class="ds">FashionIQ</div>
+      <span class="verdict">= statistical tie</span>
+      <div class="nums">dense .1706 · PUMA <b>.1681</b><br />intervals overlap</div>
+    </div>
+    <div class="bcard tie">
+      <div class="ds">MSCOCO</div>
+      <span class="verdict">= statistical tie</span>
+      <div class="nums">dense .7181 · PUMA <b>.7191</b><br />intervals overlap</div>
+    </div>
+    <div class="bcard loss">
+      <div class="ds">VisualNews</div>
+      <span class="verdict">✗ dense wins</span>
+      <div class="nums">dense .2256 · PUMA <b>.2168</b><br />the one clear gap at 2B</div>
+    </div>
+  </div>
+
+  <p style="margin-top:22px">
+    And it is <strong>not a Qwen-2B fluke</strong>. Re-running the identical recipe on a bigger backbone
+    and a different model family &mdash; changing only the cached embeddings &mdash; PUMA beats dense on
+    <strong>VisualNews and Fashion200K at Qwen-8B</strong> (about +0.027 nDCG@10 each, $p \le 0.001$)
+    and on <strong>FashionIQ and Fashion200K with RZenEmbed</strong>. Transfer is real, but uneven:
+    composed retrieval on a larger backbone gets <em>harder</em> to sparsify, not easier &mdash; which is
+    what the failure diagnostics below explain.
+  </p>
+
+  <details>
+    <summary>Full results table — three backbones × five datasets × three metrics</summary>
+    <p style="font-size:14px;color:var(--muted)">
+      H@5 = Hit@5, R@10 = Recall@10, N@10 = nDCG@10. <strong>TrAE</strong> is a matched-memory trained
+      dense autoencoder (bottleneck $2k$), trained on the same data with the same retrieval losses and
+      validation protocol. <strong>Bold</strong> = best, <u>underline</u> = second best per
+      (data, backbone, metric).
+    </p>
+    <div class="table-wrap">
+      <table class="compact">
+        <thead>
+          <tr>
+            <th rowspan="2">Data</th><th rowspan="2">Method</th>
+            <th colspan="3">Qwen-2B</th>
+            <th colspan="3" class="group-sep">Qwen-8B</th>
+            <th colspan="3" class="group-sep">RZenEmbed</th>
+          </tr>
+          <tr>
+            <th>H@5</th><th>R@10</th><th>N@10</th>
+            <th class="group-sep">H@5</th><th>R@10</th><th>N@10</th>
+            <th class="group-sep">H@5</th><th>R@10</th><th>N@10</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="block-start"><td class="rowhead" rowspan="3">CIRR</td><td>Dense</td><td><u>.5221</u></td><td><u>.6281</u></td><td><u>.4235</u></td><td class="group-sep"><strong>.5570</strong></td><td><strong>.6577</strong></td><td><strong>.4961</strong></td><td class="group-sep"><strong>.5930</strong></td><td><strong>.6914</strong></td><td><strong>.4860</strong></td></tr>
+          <tr><td>TrAE</td><td>.4784</td><td>.5849</td><td>.3885</td><td class="group-sep">.5233</td><td>.6210</td><td>.4354</td><td class="group-sep">.4962</td><td>.5963</td><td>.4087</td></tr>
+          <tr><td>PUMA</td><td><strong>.5329</strong></td><td><strong>.6449</strong></td><td><strong>.4356</strong></td><td class="group-sep"><u>.5392</u></td><td><u>.6438</u></td><td><u>.4835</u></td><td class="group-sep"><u>.5664</u></td><td><u>.6743</u></td><td><u>.4713</u></td></tr>
+
+          <tr class="block-start"><td class="rowhead" rowspan="3">FashionIQ</td><td>Dense</td><td><u>.2029</u></td><td><u>.2680</u></td><td><strong>.1706</strong></td><td class="group-sep"><u>.2321</u></td><td><u>.3027</u></td><td><strong>.1942</strong></td><td class="group-sep"><u>.2342</u></td><td><u>.3061</u></td><td><u>.1952</u></td></tr>
+          <tr><td>TrAE</td><td>.1621</td><td>.2183</td><td>.1327</td><td class="group-sep">.1777</td><td>.2345</td><td>.1478</td><td class="group-sep">.1899</td><td>.2529</td><td>.1557</td></tr>
+          <tr><td>PUMA</td><td><strong>.2062</strong></td><td><strong>.2697</strong></td><td><u>.1681</u></td><td class="group-sep"><strong>.2348</strong></td><td><strong>.3055</strong></td><td><u>.1922</u></td><td class="group-sep"><strong>.2424</strong></td><td><strong>.3144</strong></td><td><strong>.1994</strong></td></tr>
+
+          <tr class="block-start"><td class="rowhead" rowspan="3">VisualNews</td><td>Dense</td><td><strong>.2666</strong></td><td><strong>.3318</strong></td><td><strong>.2256</strong></td><td class="group-sep">.2720</td><td>.3396</td><td>.2296</td><td class="group-sep"><strong>.4587</strong></td><td><strong>.5410</strong></td><td><strong>.3933</strong></td></tr>
+          <tr><td>TrAE</td><td>.2531</td><td>.3196</td><td>.2125</td><td class="group-sep"><u>.3000</u></td><td><u>.3772</u></td><td><u>.2523</u></td><td class="group-sep">.4204</td><td>.5048</td><td>.3571</td></tr>
+          <tr><td>PUMA</td><td><u>.2590</u></td><td><u>.3243</u></td><td><u>.2168</u></td><td class="group-sep"><strong>.3052</strong></td><td><strong>.3820</strong></td><td><strong>.2561</strong></td><td class="group-sep"><u>.4215</u></td><td><u>.5069</u></td><td><u>.3588</u></td></tr>
+
+          <tr class="block-start"><td class="rowhead" rowspan="3">Fashion200K</td><td>Dense</td><td>.1198</td><td>.0879</td><td>.0792</td><td class="group-sep">.1646</td><td>.1215</td><td>.1048</td><td class="group-sep">.2054</td><td>.1521</td><td>.1339</td></tr>
+          <tr><td>TrAE</td><td><u>.1699</u></td><td><u>.1226</u></td><td><u>.1058</u></td><td class="group-sep"><u>.1856</u></td><td><u>.1308</u></td><td><u>.1183</u></td><td class="group-sep"><u>.2147</u></td><td><u>.1580</u></td><td><u>.1392</u></td></tr>
+          <tr><td>PUMA</td><td><strong>.1763</strong></td><td><strong>.1355</strong></td><td><strong>.1144</strong></td><td class="group-sep"><strong>.2071</strong></td><td><strong>.1595</strong></td><td><strong>.1318</strong></td><td class="group-sep"><strong>.2478</strong></td><td><strong>.1813</strong></td><td><strong>.1579</strong></td></tr>
+
+          <tr class="block-start"><td class="rowhead" rowspan="3">MSCOCO</td><td>Dense</td><td>.8049</td><td>.8721</td><td>.7181</td><td class="group-sep">.8184</td><td>.8835</td><td><u>.7349</u></td><td class="group-sep"><strong>.8447</strong></td><td><strong>.9012</strong></td><td><strong>.7630</strong></td></tr>
+          <tr><td>TrAE</td><td><u>.8085</u></td><td><u>.8778</u></td><td><strong>.7196</strong></td><td class="group-sep"><strong>.8267</strong></td><td><strong>.8884</strong></td><td><strong>.7367</strong></td><td class="group-sep"><u>.8301</u></td><td><u>.8903</u></td><td><u>.7445</u></td></tr>
+          <tr><td>PUMA</td><td><strong>.8098</strong></td><td><strong>.8805</strong></td><td><u>.7191</u></td><td class="group-sep"><u>.8220</u></td><td><u>.8871</u></td><td>.7297</td><td class="group-sep">.8270</td><td>.8884</td><td>.7384</td></tr>
+        </tbody>
+        <caption>
+          Operating points: $k = 160$ for Qwen-2B / RZenEmbed on CIRR, FashionIQ, VisualNews; $k = 128$ for
+          Fashion200K; $k = 144$ for MSCOCO. For Qwen-8B, $k = 144$ on CIRR and $k = 128$ elsewhere.
+        </caption>
+      </table>
+    </div>
+
+    <h3>Representative 95% bootstrap intervals (Qwen-2B, nDCG@10)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Dense</th><th>PUMA</th></tr></thead>
+        <tbody>
+          <tr><td>CIRR <span class="up">(PUMA win)</span></td><td>.4233 [.4105, .4349]</td><td>.4331 [.4214, .4446]</td></tr>
+          <tr><td>FashionIQ (parity)</td><td>.1705 [.1624, .1785]</td><td>.1681 [.1602, .1760]</td></tr>
+          <tr><td>VisualNews <span class="down">(dense win)</span></td><td>.2258 [.2209, .2308]</td><td>.2169 [.2122, .2218]</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= RULED OUT ========================= -->
+<section id="ruled-out">
+  <span class="kicker">What we ruled out</span>
+  <h2>“Isn't this just compression?” No.</h2>
+  <p class="sub">
+    Every cheaper explanation for the gains gets its own control. All of them fall short.
+  </p>
+
+  <div class="viz">
+    <div class="viz-head">
+      <span class="viz-title">CIRR · nDCG@10 at matched memory (Qwen-2B)</span>
+      <span class="viz-note">bars to scale from 0</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Encoder-only TopK</span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:83.4%"></span></span>
+      <span class="amt">.3631</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Raw TopK coordinates</span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:86.5%"></span></span>
+      <span class="amt">.3769</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Trained dense AE (2k)</span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:89.2%"></span></span>
+      <span class="amt">.3885</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl">Matched-memory PCA</span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:95.3%"></span></span>
+      <span class="amt">.4153</span>
+    </div>
+    <div class="blockrow">
+      <span class="lbl" style="color:var(--muted)">Dense (uncompressed)</span>
+      <span class="barwrap"><span class="bar gray" style="display:block;width:97.2%;background:linear-gradient(90deg,#9fb0cf,#8496b8)"></span></span>
+      <span class="amt">.4235</span>
+    </div>
+    <div class="blockrow" style="margin-bottom:0">
+      <span class="lbl" style="font-weight:700;color:var(--accent)">PUMA</span>
+      <span class="barwrap"><span class="bar blue" style="display:block;width:100%"></span></span>
+      <span class="amt" style="color:var(--accent);font-weight:700">.4356</span>
+    </div>
+    <p class="viz-cap">
+      Coordinate pruning is far too lossy. Matched-memory PCA is respectable but stays under dense.
+      Sparse retrieval supervision <em>without</em> the decoder falls clearly short — so the
+      autoencoding structure earns its keep. And across all <strong>15 model–dataset settings</strong>,
+      PUMA beats the trained dense autoencoder in <strong>12</strong>.
+    </p>
+  </div>
+
+  <div class="cards" style="margin-top:20px">
+    <div class="card">
+      <span class="step bad">vs PQ</span>
+      <h3>Product quantisation loses badly</h3>
+      <p>Exact asymmetric-distance scoring with 128-byte PQ codes reaches <strong>.2718</strong> nDCG@10 on CIRR-8B against PUMA's <strong>.4835</strong> — and PUMA wins on every dataset and every metric.</p>
+    </div>
+    <div class="card">
+      <span class="step bad">vs IVF-PQ</span>
+      <h3>ANN indexing doesn't close it either</h3>
+      <p>An IVF-PQ64×8 index gets <strong>.3547</strong> on the same setting. On MSCOCO the gap is .7297 versus .5870.</p>
+    </div>
+  </div>
+
+  <details>
+    <summary>Alternative compressors and quantisation baselines, in full</summary>
+    <h3>Direct sparsification, dense compression, decoder ablation (Qwen-2B)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Method</th><th>Hit@5</th><th>R@10</th><th>nDCG@10</th></tr></thead>
+        <tbody>
+          <tr class="block-start"><td class="rowhead" rowspan="5">CIRR</td><td>Dense</td><td><u>.5221</u></td><td><u>.6281</u></td><td><u>.4235</u></td></tr>
+          <tr><td>Raw TopK</td><td>.4655</td><td>.5688</td><td>.3769</td></tr>
+          <tr><td>PCA</td><td>.5094</td><td>.6124</td><td>.4153</td></tr>
+          <tr><td>Encoder-only</td><td>.4518</td><td>.5614</td><td>.3631</td></tr>
+          <tr><td>PUMA</td><td><strong>.5329</strong></td><td><strong>.6449</strong></td><td><strong>.4356</strong></td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="5">FashionIQ</td><td>Dense</td><td><u>.2029</u></td><td><u>.2680</u></td><td><strong>.1706</strong></td></tr>
+          <tr><td>Raw TopK</td><td>.1621</td><td>.2168</td><td>.1355</td></tr>
+          <tr><td>PCA</td><td>.1891</td><td>.2504</td><td>.1574</td></tr>
+          <tr><td>Encoder-only</td><td>.1667</td><td>.2263</td><td>.1367</td></tr>
+          <tr><td>PUMA</td><td><strong>.2062</strong></td><td><strong>.2697</strong></td><td><u>.1681</u></td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="5">Fashion200K</td><td>Dense</td><td>.1198</td><td>.0879</td><td>.0792</td></tr>
+          <tr><td>Raw TopK</td><td>.0762</td><td>.0621</td><td>.0513</td></tr>
+          <tr><td>PCA</td><td>.0861</td><td>.0652</td><td>.0538</td></tr>
+          <tr><td>Encoder-only</td><td><u>.1495</u></td><td><u>.1164</u></td><td><u>.0967</u></td></tr>
+          <tr><td>PUMA</td><td><strong>.1763</strong></td><td><strong>.1355</strong></td><td><strong>.1144</strong></td></tr>
+        </tbody>
+        <caption>Raw TopK and PCA at $k = 160$ (PCA dim $= 2k = 320$); encoder-only and PUMA at $k = 160$, except Fashion200K at $k = 128$.</caption>
+      </table>
+    </div>
+
+    <h3>Versus PQ and IVF-PQ (Qwen-8B)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Method</th><th>H@5</th><th>R@10</th><th>N@10</th></tr></thead>
+        <tbody>
+          <tr class="block-start"><td class="rowhead" rowspan="3">CIRR</td><td>PUMA</td><td><strong>.5392</strong></td><td><strong>.6438</strong></td><td><strong>.4835</strong></td></tr>
+          <tr><td>PQ-M128</td><td>.3281</td><td>.4094</td><td>.2718</td></tr>
+          <tr><td>IVF-PQ64&times;8</td><td>.4297</td><td>.5299</td><td>.3547</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="3">FashionIQ</td><td>PUMA</td><td><strong>.2348</strong></td><td><strong>.3055</strong></td><td><strong>.1922</strong></td></tr>
+          <tr><td>PQ-M128</td><td>.1301</td><td>.1729</td><td>.1084</td></tr>
+          <tr><td>IVF-PQ64&times;8</td><td>.1328</td><td>.1831</td><td>.1087</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="3">VisualNews</td><td>PUMA</td><td><strong>.3052</strong></td><td><strong>.3820</strong></td><td><strong>.2561</strong></td></tr>
+          <tr><td>PQ-M128</td><td>.1323</td><td>.1705</td><td>.1095</td></tr>
+          <tr><td>IVF-PQ64&times;8</td><td>.1133</td><td>.1546</td><td>.0933</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="3">Fashion200K</td><td>PUMA</td><td><strong>.2071</strong></td><td><strong>.1595</strong></td><td><strong>.1318</strong></td></tr>
+          <tr><td>PQ-M128</td><td>.0739</td><td>.0528</td><td>.0442</td></tr>
+          <tr><td>IVF-PQ64&times;8</td><td>.1018</td><td>.0778</td><td>.0618</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="3">MSCOCO</td><td>PUMA</td><td><strong>.8220</strong></td><td><strong>.8871</strong></td><td><strong>.7297</strong></td></tr>
+          <tr><td>PQ-M128</td><td>.6939</td><td>.7881</td><td>.6094</td></tr>
+          <tr><td>IVF-PQ64&times;8</td><td>.6747</td><td>.7554</td><td>.5870</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= KNOB ========================= -->
+<section id="knob">
+  <span class="kicker">Your call</span>
+  <h2>One dial: how small do you want it?</h2>
+  <p class="sub">
+    $k$ is set at inference, on the same checkpoint. Turn it down until the quality/storage trade
+    stops being worth it.
+  </p>
+
+  <div class="cards">
+    <div class="card">
+      <span class="step">Aggressive</span>
+      <span class="big">~82 B</span>
+      <p><strong>k = 16</strong> · ~100× smaller than FP32 dense at 2B. Still keeps <strong>74%</strong> of the dense score on CIRR and 69% on Fashion200K.</p>
+    </div>
+    <div class="card">
+      <span class="step">Balanced</span>
+      <span class="big">~246 B</span>
+      <p><strong>k = 48</strong> · ~33× smaller. Reaches <strong>96%</strong> of dense on CIRR and already <em>exceeds</em> dense on Fashion200K.</p>
+    </div>
+    <div class="card">
+      <span class="step">Default</span>
+      <span class="big">656 B</span>
+      <p><strong>k = 128–160</strong> · 8–16× smaller (25× with compact ids). Quality saturates here — this is where the headline results live.</p>
+    </div>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 940 300" role="img" aria-label="Line charts of nDCG@10 versus k for CIRR, FashionIQ and Fashion200K on Qwen-2B, each with a dashed dense baseline." xmlns="http://www.w3.org/2000/svg">
+      <style>
+        .ax { stroke:#dfe4ec; stroke-width:1; }
+        .tick { font: 10.5px -apple-system, "Segoe UI", Roboto, sans-serif; fill:#5b6573; }
+        .ttl2 { font: 700 13px -apple-system, "Segoe UI", Roboto, sans-serif; fill:#111418; }
+        .ln { fill:none; stroke:#1657d0; stroke-width:2.4; }
+        .dn { fill:none; stroke:#c0392b; stroke-width:1.6; stroke-dasharray:5 4; }
+        .pt { fill:#1657d0; }
+        .lg { font: 11.5px -apple-system, "Segoe UI", Roboto, sans-serif; fill:#5b6573; }
+      </style>
+
+      <g transform="translate(20,20)">
+        <text class="ttl2" x="0" y="0">CIRR — nDCG@10</text>
+        <line class="ax" x1="34" y1="18" x2="34" y2="208"/>
+        <line class="ax" x1="34" y1="208" x2="270" y2="208"/>
+        <text class="tick" x="0" y="22">.45</text><line class="ax" x1="30" y1="18" x2="34" y2="18"/>
+        <text class="tick" x="0" y="117">.375</text><line class="ax" x1="30" y1="113" x2="34" y2="113"/>
+        <text class="tick" x="0" y="212">.30</text><line class="ax" x1="30" y1="208" x2="34" y2="208"/>
+        <line class="dn" x1="34" y1="51.6" x2="270" y2="51.6"/>
+        <text class="lg" x="196" y="47" fill="#c0392b">dense .4235</text>
+        <polyline class="ln" points="44,191.5 74,114.3 104,72.8 134,59.2 204,39.4 260,36.5"/>
+        <circle class="pt" cx="44" cy="191.5" r="3.4"/><circle class="pt" cx="74" cy="114.3" r="3.4"/><circle class="pt" cx="104" cy="72.8" r="3.4"/><circle class="pt" cx="134" cy="59.2" r="3.4"/><circle class="pt" cx="204" cy="39.4" r="3.4"/><circle class="pt" cx="260" cy="36.5" r="3.4"/>
+        <text class="tick" x="44" y="222" text-anchor="middle">16</text>
+        <text class="tick" x="74" y="222" text-anchor="middle">32</text>
+        <text class="tick" x="104" y="222" text-anchor="middle">48</text>
+        <text class="tick" x="134" y="222" text-anchor="middle">64</text>
+        <text class="tick" x="204" y="222" text-anchor="middle">128</text>
+        <text class="tick" x="260" y="222" text-anchor="middle">160</text>
+        <text class="lg" x="152" y="242" text-anchor="middle">k (active features)</text>
+      </g>
+
+      <g transform="translate(330,20)">
+        <text class="ttl2" x="0" y="0">FashionIQ — nDCG@10</text>
+        <line class="ax" x1="34" y1="18" x2="34" y2="208"/>
+        <line class="ax" x1="34" y1="208" x2="270" y2="208"/>
+        <text class="tick" x="0" y="22">.18</text><line class="ax" x1="30" y1="18" x2="34" y2="18"/>
+        <text class="tick" x="0" y="117">.13</text><line class="ax" x1="30" y1="113" x2="34" y2="113"/>
+        <text class="tick" x="0" y="212">.08</text><line class="ax" x1="30" y1="208" x2="34" y2="208"/>
+        <line class="dn" x1="34" y1="35.9" x2="270" y2="35.9"/>
+        <text class="lg" x="192" y="31" fill="#c0392b">dense .1706</text>
+        <polyline class="ln" points="44,186.3 74,113.6 104,79.2 134,59.8 260,40.6"/>
+        <circle class="pt" cx="44" cy="186.3" r="3.4"/><circle class="pt" cx="74" cy="113.6" r="3.4"/><circle class="pt" cx="104" cy="79.2" r="3.4"/><circle class="pt" cx="134" cy="59.8" r="3.4"/><circle class="pt" cx="260" cy="40.6" r="3.4"/>
+        <text class="tick" x="44" y="222" text-anchor="middle">16</text>
+        <text class="tick" x="74" y="222" text-anchor="middle">32</text>
+        <text class="tick" x="104" y="222" text-anchor="middle">48</text>
+        <text class="tick" x="134" y="222" text-anchor="middle">64</text>
+        <text class="tick" x="260" y="222" text-anchor="middle">160</text>
+        <text class="lg" x="152" y="242" text-anchor="middle">k (active features)</text>
+      </g>
+
+      <g transform="translate(640,20)">
+        <text class="ttl2" x="0" y="0">Fashion200K — nDCG@10</text>
+        <line class="ax" x1="34" y1="18" x2="34" y2="208"/>
+        <line class="ax" x1="34" y1="208" x2="270" y2="208"/>
+        <text class="tick" x="0" y="22">.13</text><line class="ax" x1="30" y1="18" x2="34" y2="18"/>
+        <text class="tick" x="0" y="117">.09</text><line class="ax" x1="30" y1="113" x2="34" y2="113"/>
+        <text class="tick" x="0" y="212">.05</text><line class="ax" x1="30" y1="208" x2="34" y2="208"/>
+        <line class="dn" x1="34" y1="138.6" x2="270" y2="138.6"/>
+        <text class="lg" x="188" y="134" fill="#c0392b">dense .0792</text>
+        <polyline class="ln" points="44,198.2 74,113.5 104,66.2 134,53.9 204,55.6"/>
+        <circle class="pt" cx="44" cy="198.2" r="3.4"/><circle class="pt" cx="74" cy="113.5" r="3.4"/><circle class="pt" cx="104" cy="66.2" r="3.4"/><circle class="pt" cx="134" cy="53.9" r="3.4"/><circle class="pt" cx="204" cy="55.6" r="3.4"/>
+        <text class="tick" x="44" y="222" text-anchor="middle">16</text>
+        <text class="tick" x="74" y="222" text-anchor="middle">32</text>
+        <text class="tick" x="104" y="222" text-anchor="middle">48</text>
+        <text class="tick" x="134" y="222" text-anchor="middle">64</text>
+        <text class="tick" x="204" y="222" text-anchor="middle">128</text>
+        <text class="lg" x="152" y="242" text-anchor="middle">k (active features)</text>
+      </g>
+    </svg>
+    <figcaption>
+      Quality saturates around $k = 128$; $k = 64$ is already near-saturation on FashionIQ and Fashion200K.
+      CIRR is the most $k$-sensitive, as expected for composed queries. Points at $k \le 64$ come from the
+      ultra-sparse sweep, points at $k = 128$ / $160$ from the ablation and main tables. The $x$-axis is
+      ordinal, not linear.
+    </figcaption>
+  </figure>
+
+  <details>
+    <summary>Ultra-sparse numbers (k ≤ 64, Qwen-2B test split)</summary>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>$k$</th><th>Hit@5</th><th>R@10</th><th>nDCG@10</th></tr></thead>
+        <tbody>
+          <tr class="block-start"><td class="rowhead" rowspan="5">CIRR</td><td>dense</td><td>.5221</td><td>.6281</td><td>.4235</td></tr>
+          <tr><td>16</td><td>.3784</td><td>.4874</td><td>.3133</td></tr>
+          <tr><td>32</td><td>.4540</td><td>.5622</td><td>.3743</td></tr>
+          <tr><td>48</td><td>.4887</td><td>.6038</td><td>.4070</td></tr>
+          <tr><td>64</td><td>.4990</td><td>.6185</td><td>.4177</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="5">FashionIQ</td><td>dense</td><td>.2029</td><td>.2680</td><td>.1706</td></tr>
+          <tr><td>16</td><td>.1129</td><td>.1566</td><td>.0914</td></tr>
+          <tr><td>32</td><td>.1609</td><td>.2152</td><td>.1297</td></tr>
+          <tr><td>48</td><td>.1821</td><td>.2401</td><td>.1478</td></tr>
+          <tr><td>64</td><td>.1922</td><td>.2580</td><td>.1580</td></tr>
+          <tr class="block-start"><td class="rowhead" rowspan="5">Fashion200K</td><td>dense</td><td>.1198</td><td>.0879</td><td>.0792</td></tr>
+          <tr><td>16</td><td>.0861</td><td>.0799</td><td>.0543</td></tr>
+          <tr><td>32</td><td>.1449</td><td>.1326</td><td>.0900</td></tr>
+          <tr><td>48</td><td>.1629</td><td>.1556</td><td>.1099</td></tr>
+          <tr><td>64</td><td>.1763</td><td>.1654</td><td>.1151</td></tr>
+        </tbody>
+        <caption>Measured from the same checkpoints as the main table, with $k$ varied only at inference.</caption>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= FAILURE MODES ========================= -->
+<section id="breaks">
+  <span class="kicker">When it breaks</span>
+  <h2>Two failure modes — and how to spot them before you ship</h2>
+  <p class="sub">
+    Post-hoc sparsification does not always work. The useful part is that the two ways it fails look
+    completely different on the diagnostics, and both are measurable during training.
+  </p>
+
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Failure mode 1 · Not enough support before TopK</span>
+      <span class="viz-note">Qwen-8B · CIRR · $k = 160$</span>
+    </div>
+    <div class="topk-grid">
+      <div>
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">You ask for 160 active features…</div>
+        <div class="track" style="height:26px"><span class="fill an-grow" style="width:81.8%;background:linear-gradient(90deg,#e08a6a,#c0392b)"></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px">
+          <span>…but the encoder only realises <strong>k</strong> on <strong>81.8%</strong> of examples</span>
+          <span style="color:var(--bad);font-weight:700">stalls</span>
+        </div>
+      </div>
+      <div>
+        <p style="font-size:14.5px;margin:0;color:var(--muted)">
+          Only <strong style="color:var(--fg)">166.5</strong> positive pre-activations on average, against
+          a requested $k = 160$. <strong style="color:var(--fg)">Raising $k$ cannot help</strong> — the
+          support simply is not there to select from. Result: .484 sparse vs .496 dense nDCG@10.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="viz anim">
+    <div class="viz-head">
+      <span class="viz-title">Failure mode 2 · Plenty of support, pointing the wrong way</span>
+      <span class="viz-note">RZenEmbed · VisualNews · $k = 160$</span>
+    </div>
+    <div class="topk-grid">
+      <div>
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Support is abundant — 465.3 pre-activations, $k$ reached on <em>every</em> example</div>
+        <div class="track" style="height:26px"><span class="fill an-grow" style="width:100%;background:linear-gradient(90deg,#3fb083,#12855a)"></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px">
+          <span>reach = <strong>1.000</strong></span>
+          <span style="color:var(--good);font-weight:700">100%</span>
+        </div>
+      </div>
+      <div>
+        <p style="font-size:14.5px;margin:0;color:var(--muted)">
+          And yet retrieval quality stays well below dense: <strong style="color:var(--fg)">.359</strong>
+          against <strong style="color:var(--fg)">.393</strong> nDCG@10. The active atoms do not preserve
+          the dense ranking geometry. <strong style="color:var(--fg)">Support availability is necessary,
+          not sufficient.</strong>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p>
+    That distinction is the practical takeaway: <strong>check reach before you tune $k$</strong>. If reach
+    is below 1.0 you have a coverage problem and no amount of extra budget fixes it; if reach is 1.0 and
+    quality still lags, you have an alignment problem. Both diagnostics can be monitored during training.
+  </p>
+
+  <details>
+    <summary>Support diagnostics, in full</summary>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>$k$</th><th>Pos-pre</th><th>Reach</th><th>Used</th><th>PUMA / Dense N@10</th></tr></thead>
+        <tbody>
+          <tr><td>Qwen-8B · CIRR</td><td>160</td><td>166.5</td><td>0.818</td><td>199</td><td>.484 / .496</td></tr>
+          <tr><td>RZenEmbed · VisualNews</td><td>160</td><td>465.3</td><td>1.000</td><td>497</td><td>.359 / .393</td></tr>
+        </tbody>
+        <caption>Pos-pre: mean positive pre-TopK activations. Reach: fraction of examples realising $k$ exactly. Used: distinct active features.</caption>
+      </table>
+    </div>
+    <h3>Support usage at $k = 128$</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Setting</th><th>Pos-pre</th><th>Active</th><th>Reach</th></tr></thead>
+        <tbody>
+          <tr><td>CIRR</td><td>Encoder-only, 2B</td><td>3774.4</td><td>128.0</td><td>1.000</td></tr>
+          <tr><td>CIRR</td><td>PUMA, 2B</td><td>363.8</td><td>128.0</td><td>1.000</td></tr>
+          <tr><td>CIRR</td><td>PUMA, 8B</td><td>167.5</td><td>128.0</td><td>1.000</td></tr>
+        </tbody>
+        <caption>Both 2B checkpoints sit well past support saturation. On 8B the positive pre-activations drop sharply — the support-limited regime above.</caption>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ========================= UNDER THE HOOD ========================= -->
+<section id="hood">
+  <span class="kicker">Under the hood</span>
+  <h2>The parts we skipped</h2>
+  <p class="sub">Everything a reviewer or an engineer reproducing this would want, kept out of the way.</p>
+
+  <details>
+    <summary>Setup, backbones, and hyperparameters</summary>
+    <ul>
+      <li><strong>Backbones (frozen).</strong> Qwen3-VL-Embedding-2B ($d = 2048$) for the main experiments; Qwen3-VL-Embedding-8B ($d = 4096$) for within-family scaling; RZenEmbed ($d = 3584$) for cross-family transfer. Dense baselines and all sparse variants share identical prompts, cached embeddings, and candidate pools, so only sparsification varies.</li>
+      <li><strong>Dictionary.</strong> Expansion ratio 16× throughout, so $D = 32{,}768$ for Qwen-2B and $D = 16d$ analogously for larger backbones. Varying $D$ is left for future work.</li>
+      <li><strong>Optimisation.</strong> AdamW, weight decay $10^{-2}$; learning rates $3\times10^{-4}$ (Stage ②) and $1\times10^{-4}$ (Stage ③), with 1,000 / 500 linear warmup steps then cosine decay; 40,000 Stage ② steps and 5,000 Stage ③ steps; batch size 64; decoder column-norm renormalisation after every step.</li>
+      <li><strong>Model selection.</strong> A fixed 5% of training queries (same seed for every run) held out for checkpoint selection by sparse nDCG@10; validation splits pick the operating point $k$; the test split is evaluated once.</li>
+      <li><strong>Hardware.</strong> Dense embeddings extracted with vLLM where supported; sparse training and evaluation in PyTorch on a single NVIDIA A100.</li>
+      <li><strong>Metrics.</strong> Hit@5, Recall@10, nDCG@10 — nDCG@10 used for validation.</li>
+    </ul>
+  </details>
+
+  <details>
+    <summary>Datasets — five M-BEIR tasks, 5K to 542K candidates</summary>
+    <p style="font-size:14.5px;color:var(--muted)">
+      <strong>Composed image retrieval</strong> (image–text query, image candidates): CIRR, FashionIQ.
+      <strong>Text-to-image retrieval</strong>: VisualNews, Fashion200K, MSCOCO.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dataset</th><th>Train queries</th><th>Train positives</th><th>Val queries</th><th>Test queries</th><th>Candidates</th></tr></thead>
+        <tbody>
+          <tr><td>CIRR</td><td>26 116</td><td>26 676</td><td>2 000</td><td>4 170</td><td>21 551</td></tr>
+          <tr><td>FashionIQ</td><td>16 176</td><td>16 266</td><td>1 700</td><td>6 003</td><td>74 381</td></tr>
+          <tr><td>VisualNews</td><td>199 903</td><td>200 000</td><td>19 996</td><td>19 995</td><td>542 246</td></tr>
+          <tr><td>Fashion200K</td><td>30 000</td><td>63 945</td><td>1 746</td><td>1 719</td><td>201 824</td></tr>
+          <tr><td>MSCOCO</td><td>213 287</td><td>670 619</td><td>24 819</td><td>24 809</td><td>5 000</td></tr>
+          <tr><td><strong>Total</strong></td><td><strong>485 482</strong></td><td><strong>977 506</strong></td><td><strong>50 261</strong></td><td><strong>56 696</strong></td><td>&mdash;</td></tr>
+        </tbody>
+        <caption>Candidates is the official <em>test</em> candidate pool — an evaluation statistic, not a count of training examples.</caption>
+      </table>
+    </div>
+  </details>
+
+  <details>
+    <summary>Can one adapter serve all five tasks?</summary>
+    <p style="font-size:14.5px">
+      Mostly. A single SAE trained on all five datasets together (Qwen-2B, $k = 128$) retains
+      92.7–99.0% of task-specific nDCG@10 on four tasks — but only 61.4% on Fashion200K. So a shared
+      adapter is a viable simplification for most of the benchmark family, and the headline results use
+      task-specific adapters.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Task-specific</th><th>Pooled</th><th>Retention</th></tr></thead>
+        <tbody>
+          <tr><td>CIRR</td><td>.4356</td><td>.4097</td><td>94.1%</td></tr>
+          <tr><td>FashionIQ</td><td>.1681</td><td>.1558</td><td>92.7%</td></tr>
+          <tr><td>VisualNews</td><td>.2168</td><td>.2019</td><td>93.1%</td></tr>
+          <tr><td>Fashion200K</td><td>.1144</td><td>.0702</td><td><span class="down">61.4%</span></td></tr>
+          <tr><td>MSCOCO</td><td>.7191</td><td>.7119</td><td>99.0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details>
+    <summary>Limitations we want to be upfront about</summary>
+    <ul>
+      <li>Main experiments centre on the Qwen embedding family, with RZenEmbed as a cross-family check. Transfer is real, but sparsification behaviour clearly depends on the geometry of the frozen backbone.</li>
+      <li>The failure analysis <em>diagnoses</em> two bottlenecks; it does not solve them. Future objectives should jointly encourage sufficient dictionary coverage <em>and</em> retrieval-aligned active features.</li>
+      <li>PUMA is post-hoc, so it inherits the representational properties of the frozen backbone — including any domain imbalance or bias. Deployment-sensitive settings should audit the sparsified retriever alongside the original dense model.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ========================= GET STARTED ========================= -->
+<section id="start">
+  <div class="cta">
+    <h2>Four steps to a sparse index</h2>
+    <p>No backbone retraining, one A100, and the embeddings you already computed.</p>
+    <div class="actions" style="margin-bottom:0">
+      <a class="btn" href="https://github.com/sisinflab/PUMA">💻 github.com/sisinflab/PUMA</a>
+      <a class="btn" href="assets/PUMA.pdf">📄 Read the paper</a>
+    </div>
+  </div>
+
+  <ol style="margin-top:28px">
+    <li><strong>Cache embeddings</strong> — run the frozen backbone once over your train / val / candidate partitions and store the dense vectors. Every later step reads from this cache, so sparse training cost never depends on the backbone.</li>
+    <li><strong>Stage ② — sparse pretraining</strong> — train the TopK SAE at $D = 16d$ with cosine reconstruction, dot-product distillation, cross-modal alignment, AuxK revival, the small contrastive blend, and progressive $k$-annealing to the target support.</li>
+    <li><strong>Stage ③ — retrieval fine-tuning</strong> — InfoNCE over sparse codes with in-batch (and hard, where available) negatives, keeping $\alpha \mathcal{L}_{\text{rec}} + \beta \mathcal{L}_{\text{dist}}$ as regularisers. Select checkpoints on the 5% holdout by sparse nDCG@10.</li>
+    <li><strong>Evaluate &amp; index</strong> — pick $k$ on the validation split, score the test split once with the sparse dot product, and optionally remap corpus-active atoms to compact ids for the 9-bit / 8-bit storage rows.</li>
+  </ol>
+
+  <h3>Citation</h3>
+  <pre><code>@inproceedings{puma2026,
+  title     = {PUMA: Post-Hoc Sparsification of Universal Multimodal Embeddings
+               for Efficient Retrieval},
+  author    = {Attimonelli, Matteo and De Bellis, Alessandro and
+               Nardini, Franco Maria and Pomo, Claudio and Rulli, Cosimo and
+               Venturini, Rossano and Di Noia, Tommaso},
+  year      = {2026},
+  url       = {https://github.com/sisinflab/PUMA},
+}</code></pre>
+  <p class="note">Update with the venue (<code>booktitle</code>, <code>pages</code>) or the arXiv id once available.</p>
+</section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    Code: <a href="https://github.com/sisinflab/PUMA">github.com/sisinflab/PUMA</a>
+    &middot; Contact: Matteo Attimonelli (<code>matteo.attimonelli@poliba.it</code>)
+    <br />
+    <span style="display:inline-block;margin-top:8px">Politecnico di Bari · Sapienza University of Rome · ISTI–CNR, Pisa · University of Pisa</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Start the looping simulations only once they scroll into view, and stamp the
+  // moment each one starts so the numeric counters stay in phase with the CSS loops.
+  function play(el) {
+    if (el.classList.contains("in-view")) return;
+    el.__t0 = performance.now();
+    el.classList.add("in-view");
+  }
+
+  var blocks = document.querySelectorAll(".anim");
+  if ("IntersectionObserver" in window && !reduce) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) play(e.target); });
+    }, { threshold: 0.2 });
+    blocks.forEach(function (b) { io.observe(b); });
+  } else {
+    blocks.forEach(play);
+  }
+
+  // Numeric counters kept in sync with the CSS loop period.
+  var counters = [].slice.call(document.querySelectorAll("[data-count-loop]"));
+  if (!counters.length) return;
+
+  counters.forEach(function (el) {
+    el.__host = el.closest(".anim");
+    el.__cfg = {
+      period: parseFloat(el.dataset.countLoop),
+      from: parseFloat(el.dataset.countFrom),
+      to: parseFloat(el.dataset.countTo),
+      start: parseFloat(el.dataset.countStart || "0"),
+      end: parseFloat(el.dataset.countEnd || "1"),
+      dec: parseInt(el.dataset.countDec || "0", 10),
+      suffix: el.dataset.countSuffix || ""
+    };
+  });
+
+  function fmt(v, dec) {
+    return dec > 0 ? v.toFixed(dec) : Math.round(v).toLocaleString("en-US");
+  }
+
+  if (reduce) {
+    counters.forEach(function (el) {
+      el.textContent = fmt(el.__cfg.to, el.__cfg.dec) + el.__cfg.suffix;
+    });
+    return;
+  }
+
+  function frame(ts) {
+    counters.forEach(function (el) {
+      var c = el.__cfg;
+      var host = el.__host;
+      if (!host || host.__t0 === undefined) return;
+      var phase = ((ts - host.__t0) % c.period) / c.period;
+      var p = (phase - c.start) / (c.end - c.start);
+      p = p < 0 ? 0 : p > 1 ? 1 : p;
+      el.textContent = fmt(c.from + (c.to - c.from) * p, c.dec) + c.suffix;
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
